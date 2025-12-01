@@ -12,10 +12,24 @@ app.use(cors());
 app.use(express.json());
 
 // PostgreSQL pool
+const { Pool } = require('pg');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
 });
+
+async function connectWithRetry() {
+  try {
+    await pool.connect();
+    console.log('PostgreSQL connected!');
+  } catch (err) {
+    console.error('DB connection error', err);
+    setTimeout(connectWithRetry, 5000); // thử lại sau 5 giây
+  }
+}
+
+connectWithRetry();
+
 
 // Test connection
 pool.connect((err, client, release) => {
