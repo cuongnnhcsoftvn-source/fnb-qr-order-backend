@@ -1,8 +1,11 @@
+console.log("DATABASE_URL =", process.env.DATABASE_URL);
 const express = require('express');
 const cors = require('cors');
 const { Pool } = require('pg');
 const http = require('http');
 const { Server } = require('socket.io');
+
+console.log("DATABASE_URL =", process.env.DATABASE_URL);
 
 const app = express();
 const server = http.createServer(app);
@@ -17,30 +20,21 @@ const pool = new Pool({
   ssl: { rejectUnauthorized: false }
 });
 
+// Retry connect
 async function connectWithRetry() {
   try {
-    await pool.connect();
-    console.log('PostgreSQL connected!');
+    const client = await pool.connect();
+    console.log("PostgreSQL connected!");
+    client.release();
   } catch (err) {
-    console.error('DB connection error', err);
-    setTimeout(connectWithRetry, 5000); // thử lại sau 5 giây
+    console.error("DB connection error:", err);
+    setTimeout(connectWithRetry, 5000);
   }
 }
 
 connectWithRetry();
 
-
-// Test connection
-pool.connect((err, client, release) => {
-  if (err) {
-    console.error('DB connection error', err.stack);
-  } else {
-    console.log('PostgreSQL connected');
-  }
-  release();
-});
-
-// API lấy menu
+// Routes
 app.get('/api/menu', async (req,res)=>{
   try {
     const result = await pool.query('SELECT * FROM menu_items ORDER BY id');
@@ -51,7 +45,6 @@ app.get('/api/menu', async (req,res)=>{
   }
 });
 
-// API tạo order
 app.post('/api/orders', async (req,res)=>{
   const { table_id, items } = req.body;
   try {
@@ -76,9 +69,11 @@ app.post('/api/orders', async (req,res)=>{
   }
 });
 
-// Socket.IO realtime
+// Socket.IO
 io.on('connection', (socket)=>{
   console.log('Kitchen connected:', socket.id);
 });
 
-server.listen(process.env.PORT || 3000, ()=>console.log('Server running'));
+// Render required port
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, ()=>console.log('Server running on port ' + PORT));
