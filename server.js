@@ -1,8 +1,8 @@
 const express = require('express');
-const mysql = require('mysql2');
-const http = require('http');
-const { Server } = require("socket.io");
 const cors = require('cors');
+const { Pool } = require('pg');
+const http = require('http');
+const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
@@ -11,39 +11,61 @@ const io = new Server(server, { cors: { origin: "*" }});
 app.use(cors());
 app.use(express.json());
 
-const db = mysql.createConnection({
-  host: 'dpg-d4mi3gu3jp1c739ujks0-a', // thay bằng cloud MySQL
-  user: 'fnb_app_user',
-  password: '6HAYc7CkyIxUEJ750ccuiJyLbMy6fl4K',
-  database: 'fnb_app'
+// PostgreSQL pool
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  ssl: { rejectUnauthorized: false }
+});
+
+// Test connection
+pool.connect((err, client, release) => {
+  if (err) {
+    console.error('DB connection error', err.stack);
+  } else {
+    console.log('PostgreSQL connected');
+  }
+  release();
 });
 
 // API lấy menu
-app.get('/api/menu', (req,res)=>{
-  db.query('SELECT * FROM menu_items', (err, results)=>{
-    if(err) return res.status(500).send(err);
-    res.json(results);
-  })
-})
-
-// API tạo order
-app.post('/api/orders', (req,res)=>{
-  const { table_id, items } = req.body;
-  db.query('INSERT INTO orders (table_id) VALUES (?)', [table_id], (err,result)=>{
-    if(err) return res.status(500).send(err);
-    const order_id = result.insertId;
-    const values = items.map(i=>[order_id, i.menu_item_id, i.quantity, i.note]);
-    db.query('INSERT INTO order_items (order_id, menu_item_id, quantity, note) VALUES ?', [values], (err2)=>{
-      if(err2) return res.status(500).send(err2);
-      io.emit('new_order', { order_id, table_id, items });
-      res.json({ success:true, order_id });
-    })
-  })
-})
-
-// Socket bếp
-io.on('connection', (socket)=>{
-  console.log('Kitchen connected: ', socket.id);
+app.get('/api/menu', async (req,res)=>{
+  try {
+    const result = await pool.query('SELECT * FROM menu_items ORDER BY id');
+    res.json(result.rows);
+  } catch(err){
+    console.error(err);
+    res.status(500).send(err);
+  }
 });
 
-server.listen(3000, ()=>console.log('Server running on port 3000'));
+// API tạo order
+app.post('/api/orders', async (req,res)=>{
+  const { table_id, items } = req.body;
+  try {
+    const orderResult = await pool.query(
+      'INSERT INTO orders (table_id, status) VALUES ($1, $2) RETURNING id',
+      [table_id, 'new']
+    );
+    const order_id = orderResult.rows[0].id;
+
+    for(const item of items){
+      await pool.query(
+        'INSERT INTO order_items (order_id, menu_item_id, quantity, note) VALUES ($1,$2,$3,$4)',
+        [order_id, item.menu_item_id, item.quantity, item.note || ""]
+      );
+    }
+
+    io.emit('new_order', { order_id, table_id, items });
+    res.json({ success:true, order_id });
+  } catch(err){
+    console.error(err);
+    res.status(500).send(err);
+  }
+});
+
+// Socket.IO realtime
+io.on('connection', (socket)=>{
+  console.log('Kitchen connected:', socket.id);
+});
+
+server.listen(process.env.PORT || 3000, ()=>console.log('Server running'));
