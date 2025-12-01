@@ -12,7 +12,6 @@ app.use(cors());
 app.use(express.json());
 
 // PostgreSQL pool
-const { Pool } = require('pg');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }
